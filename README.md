@@ -40,28 +40,78 @@ docker exec -ti ossec-server /var/ossec/bin/list_agents -a
 
 **Please note**: All the SMTP and SYSLOG configuration variables are only applicable to the first time setup. Once the container's data volume has been initialized, all the configuration options for OSSEC can be changed.
 
-## Known Issues / Warnings
 
-#### ossec-execd is not enabled
 
-Since this is a docker container, ossec-execd really isn't a great idea anyway. Having a log server, such as graylog, react based on log entries is the recommended approach.
+## Agentless monitoring
 
-#### A default localhost agent is added
-
-On first launch, the ossec server will not start up properly and bind to port 1514, unless at least one agent to be present in the client.keys file. To avoid that issue, a local agent is setup by default. See [this bug](https://groups.google.com/forum/#!topic/ossec-list/qeC_h3EZCxQ) with OSSEC.
-
-#### Running on OS X using Docker For Mac
-
-The [osxfs integration](https://docs.docker.com/docker-for-mac/osxfs/) used for volume binding on Mac OS X causes an issue resolving symlinks in the container. To work around this issue, just don't bind `/var/ossec/data` to a host directory. Instead, use a regular docker volume and execute a shell in the container to inspect the data. All the typical docker volume management tricks apply, of course.
+After you installed OSSEC, you need to enable the agentless monitoring:
 
 ```
-# To start the container on OS X
-docker run --name ossec-server -d -p 1514:1514/udp -p 1515:1515\
-  -e SYSLOG_FORWADING_ENABLED=true -e SYSLOG_FORWARDING_SERVER_IP=X.X.X.X\
-  -v /var/ossec/data xetusoss/ossec-server
+/var/ossec/bin/ossec-control enable agentless
+```
+#### Connection with public key authentication
+
+```
+sudo -u ossec ssh-keygen
+```
+It will create the public keys inside `/var/ossec/.ssh`. After that, just scp the public key to the remote box and your password less connection should work.
+
+```
+ssh-copy-id -i ~/.ssh/id_rsa.pub user@10.0.0.1
+```
+Add the endpoint by running the following command on the OSSEC server:
+
+```
+/var/ossec/agentless/register_host.sh add user@10.0.0.1 NOPASS
 ```
 
+The command output must be similar to the following:
 
-## Issues /   Pull Requests
+`*Host user@test.com added.`
 
-Since this image has become the de-facto standard for OSSEC on docker hub, I wanted to be very clear that we intend to maintain this image with the interest of the community in mind. If you have issues, please file them. If you have made changes you'd like to see included, pull requests are welcome!
+#### List connected endpoints
+Use the following command to display the connected endpoints:
+
+```
+/var/ossec/agentless/register_host.sh list
+```
+Output:
+`*Available hosts:`
+`user@10.0.0.1`
+
+#### Configuring agentless
+Add the setting below to the `/data/etc/ossec.conf` configuration file of the Wazuh server to monitor the /bin and /etc directories
+
+Example of configuring of linux file integrity monitoring with common "ssh_integrity_check_linux" script:
+
+```
+<agentless>
+    <type>ssh_integrity_check_linux</type>
+    <frequency>3600</frequency>
+    <host>user@10.0.0.1</host>
+    <state>periodic</state>
+    <arguments>/bin /etc</arguments>
+</agentless>
+```
+See more about scripts: https://www.ossec.net/docs/docs/manual/agent/agentless-scripts.html
+
+
+#### Running the completed setup
+Once the configuration is completed, you can restart OSSEC. You should see something like “Started ossec-agentlessd” in the output. Before each agentless connection is started, OSSEC will do a configuration check to make sure everything is fine. Look at `/data/logs/ossec.log` for any error. You should see after restart:
+
+`2022/12/12 15:24:12 ossec-agentlessd: INFO: Test passed for 'ssh_integrity_check_bsd'.'`
+
+When it connects to the remote agentless host, you will also see:
+
+`2022/12/12 15:25:19 ossec-agentlessd: INFO: ssh_integrity_check_bsd: user@10.0.0.1: Starting.`
+`2022/12/12 15:25:46 ossec-agentlessd: INFO: ssh_integrity_check_bsd: user@10.0.0.1: Finished.`
+
+## Alerts
+
+By default, OSSEC writes alerts to a log file located along the path: `/data/logs/alerts/alerts.log`
+
+See more about alerts output options: https://www.ossec.net/docs/docs/manual/output/index.html
+
+
+
+
